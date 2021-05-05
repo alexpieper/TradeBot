@@ -32,10 +32,11 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
 
         # get information about current investments:
         bal = utils.get_currency_balance(client, symbol)
-        if (float(bal) * float(DF_dict[symbol]["close"].iloc[-1])) > 1:
+        if (float(bal) * float(DF_dict[symbol]["close"].iloc[-1])) > 3:
             positions[symbol] = True
         else:
             positions[symbol] = False
+    print(positions)
         
     
     #### Actual bot ####
@@ -60,7 +61,13 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
             log.info(f"Z-Score of {symbol}:            {current_opportunity}")
 
             # getting account information like balance etc.
-            bal = utils.get_currency_balance(client, symbol)
+            try:
+                bal = utils.get_currency_balance(client, symbol)
+            except Exception as e:
+                print(e)
+                log.info(f"Data pull error on Binance side, waiting 15 minutes to reconnect")
+                break
+
             log.info(f'current balance of {symbol.split("EUR")[0]}:       {bal}')
             
             # check opportunities and potentially issue an order
@@ -72,31 +79,30 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
                     order = client.create_order(symbol = symbol,
                                                 side = SIDE_BUY,
                                                 type = ORDER_TYPE_MARKET,
-                                                quoteOrderQty = 20)
+                                                quoteOrderQty = 300)
                     print(order)
                     positions[symbol] = True
 
-                    order_book = pd.read_csv("order_book.csv")
-                    order_book = order_book.append(pd.DataFrame(order, index=[len(order_book) + 1,]))
-                    order_book.to_csv("order_book.csv", index = False)
-
+                    
                     log.info(f'                                         market BUY order placed for {symbol} !!!')
                     
             else:
                 if positions[symbol]:
                     # Actual sell function, handle with care!
-                    order = client.create_order(symbol = symbol,
-                                                side = SIDE_SELL,
-                                                type = ORDER_TYPE_MARKET,
-                                                quoteOrderQty = np.round(float(utils.get_currency_balance(client, symbol)) * float(DF_dict[symbol]["close"].iloc[-1] * 0.99),1))
-                                                # quantity = np.round(float(utils.get_currency_balance(client, symbol)) * float(DF_dict[symbol]["close"].iloc[-1] * 0.99),1))
-                                                # quoteOrderQty = np.round(float(utils.get_currency_balance(client, symbol)) * float(DF_dict[symbol]["close"].iloc[-1]),6))
+                    decimal_place = 15
+                    while decimal_place > -1:
+                        try:
+                            order = client.create_order(symbol = symbol,
+                                                    side = SIDE_SELL,
+                                                    type = ORDER_TYPE_MARKET,
+                                                    quantity = quantity)
+                            break
+                        except:
+                            decimal_place -= 1
+                            quantity = np.round(float(client.get_asset_balance(asset=symbol.split("EUR")[0])["free"]), decimal_place)
+                    
                     print(order)
                     positions[symbol] = False
-
-                    order_book = pd.read_csv("order_book.csv")
-                    order_book = order_book.append(pd.DataFrame(order, index=[len(order_book) + 1,]))
-                    order_book.to_csv("order_book.csv", index = False)
 
                     log.info(f'                                         market SELL order placed for {symbol} !!!')
 
@@ -104,7 +110,7 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
                     pass
         end = time.time()
         # sleep for exactly 15 minutes since start
-        time.sleep(60 * 15 - (end - start))
+        time.sleep(60 * 15 - (end - start) - 1/24)
     
 
 if __name__ == "__main__":
