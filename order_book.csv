@@ -1,2 +1,0 @@
-symbol,orderId,clientOrderId,transactTime,price,origQty,executedQty,status,timeInForce,type,side,orderListId,cummulativeQuoteQty,fills
-BTCEUR,28,someid,1507725176595,0.0,10.0,10.0,FILLED,GTC,MARKET,SELL,-1.0,20,"{'price': '0.29385000', 'qty': '68.00000000', 'commission': '0.06800000', 'commissionAsset': 'BTC', 'tradeId': someId}"
