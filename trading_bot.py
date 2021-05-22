@@ -18,6 +18,8 @@ logging.basicConfig(level=logging.INFO)
 
 data_folder = "data"
 
+def trunc(values, decs=0):
+    return np.trunc(values*10**decs)/(10**decs)
     
 
 def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long):
@@ -28,11 +30,11 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
     for symbol in trade_pairs:
         # pull initial dataframes
         utils.delete_data(symbol, kline_size)
-        DF_dict[symbol] = utils.retrieve_data(client, symbol, kline_size, save = True, start = "2021-04-13")
+        DF_dict[symbol] = utils.retrieve_data(client, symbol, kline_size, save = True, start = "2021-04-20")
 
         # get information about current investments:
         bal = utils.get_currency_balance(client, symbol)
-        if (float(bal) * float(DF_dict[symbol]["close"].iloc[-1])) > 3:
+        if (float(bal) * float(DF_dict[symbol]["close"].iloc[-1])) > 10:
             positions[symbol] = True
         else:
             positions[symbol] = False
@@ -96,15 +98,16 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
                                                     side = SIDE_SELL,
                                                     type = ORDER_TYPE_MARKET,
                                                     quantity = quantity)
+                            print(order)
+                            positions[symbol] = False
+
+                            log.info(f'                                         market SELL order placed for {symbol} !!!')
                             break
                         except:
                             decimal_place -= 1
-                            quantity = np.round(float(client.get_asset_balance(asset=symbol.split("EUR")[0])["free"]), decimal_place)
-                    
-                    print(order)
-                    positions[symbol] = False
-
-                    log.info(f'                                         market SELL order placed for {symbol} !!!')
+                            # is should always round down, not up. therefore trunc() not np.round().
+                            
+                            quantity = trunc(float(client.get_asset_balance(asset=symbol.split("EUR")[0])["free"]), decimal_place)     
 
                 else:
                     pass
