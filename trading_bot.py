@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import time
 import datetime
+from datetime import timedelta
 import os
 
 import logging
@@ -22,45 +23,54 @@ def trunc(values, decs=0):
     return np.trunc(values*10**decs)/(10**decs)
     
 
-def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long):
+def start_trading_bot(client, trade_pairs, kline_size, windows_short, windows_long):
     
     #### Initialization ####
     DF_dict = {}
     positions = {}
+    start_day = (datetime.datetime.now() - timedelta(days = 2)).strftime("%Y-%m-%d")
     for symbol in trade_pairs:
         # pull initial dataframes
         utils.delete_data(symbol, kline_size)
-        DF_dict[symbol] = utils.retrieve_data(client, symbol, kline_size, save = True, start = "2021-04-20")
+        DF_dict[symbol] = utils.retrieve_data(client, symbol, kline_size, save = True, start = start_day) 
 
         # get information about current investments:
         bal = utils.get_currency_balance(client, symbol)
-        if (float(bal) * float(DF_dict[symbol]["close"].iloc[-1])) > 10:
+        if (float(bal) * float(DF_dict[symbol]["close"].iloc[-1])) > 1:
             positions[symbol] = True
         else:
-            positions[symbol] = False
-    print(positions)
-        
+            positions[symbol] = False    
     
     #### Actual bot ####
+    skip_next = False
+    while int(datetime.datetime.now().strftime("%S")) != 54:
+        time.sleep(1)
     while True:
-        log.info(f'########################### Next Iteration: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} ########################### ')
-        start = time.time()
+        now = datetime.datetime.now()
         for symbol in trade_pairs:
-            log.info(f"########################### {symbol} ###########################")
             # update data, try catch the potential api resetting
             try:
                 DF_dict[symbol] = utils.update_data(client, symbol, kline_size, save = True)
             except Exception as e:
                 print(e)
-                log.info(f"Data pull error on Binance side, waiting 15 minutes to reconnect")
+                log.info(f"Data pull error on Binance side, waiting to reconnect")
+                skip_next = True
                 break
 
-
+        for symbol in trade_pairs:
+            if skip_next:
+                skip_next = False
+                break
             # calculating rolling_windows and z-score
             DF_dict[symbol]         = utils.make_rolling_and_score(DF_dict[symbol], windows_short[symbol], windows_long[symbol])
-            print(DF_dict[symbol].tail(5))
-            current_opportunity     = DF_dict[symbol]["score"].iloc[-1]
-            log.info(f"Z-Score of {symbol}:            {current_opportunity}")
+            current_opportunity     = float(DF_dict[symbol]["score"].iloc[-1])
+
+            if int(now.strftime("%M")) in [30,0]:
+                if symbol == trade_pairs[0]:
+                    log.info(f'########################### Time: {now.strftime("%Y-%m-%d %H:%M:%S")} ########################### ')
+                price = float(DF_dict[symbol]['close'].iloc[-1])
+                log.info(f"Z-Score of {symbol}:\t\t{np.round(current_opportunity,4)}, price:\t\t{np.round(price,5)}")
+                
 
             # getting account information like balance etc.
             try:
@@ -70,7 +80,6 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
                 log.info(f"Data pull error on Binance side, waiting 15 minutes to reconnect")
                 break
 
-            log.info(f'current balance of {symbol.split("EUR")[0]}:       {bal}')
             
             # check opportunities and potentially issue an order
             if current_opportunity > 0:
@@ -78,15 +87,25 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
                     pass
                 else:
                     # Actual buy function, handle with care!
-                    order = client.create_order(symbol = symbol,
-                                                side = SIDE_BUY,
-                                                type = ORDER_TYPE_MARKET,
-                                                quoteOrderQty = 300)
-                    print(order)
+                    try:
+                        order = client.create_order(symbol = symbol,
+                                                    side = SIDE_BUY,
+                                                    type = ORDER_TYPE_MARKET,
+                                                    quoteOrderQty = 300)
+                    except:
+                        order = client.create_order(symbol = symbol,
+                                                    side = SIDE_BUY,
+                                                    type = ORDER_TYPE_MARKET,
+                                                    quoteOrderQty = client.get_asset_balance(asset="EUR")["free"])
                     positions[symbol] = True
-
-                    
-                    log.info(f'                                         market BUY order placed for {symbol} !!!')
+                    buy_price = np.round(float(order['fills'][0]['price']),5)
+                    eur_amount = np.round(float(order['cummulativeQuoteQty']),2)
+                    log.info(f'##################################################################### ')
+                    log.info(f'########################### Buy Executed! ########################### ')
+                    log.info(f'########################### Time: {now.strftime("%Y-%m-%d %H:%M:%S")} ############### ')
+                    log.info(f'######## BUY order placed for {symbol} at {buy_price} for {eur_amount} EUR ######## ')
+                    log.info(f'########################### Buy Executed! ########################### ')
+                    log.info(f'##################################################################### ')
                     
             else:
                 if positions[symbol]:
@@ -98,10 +117,15 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
                                                     side = SIDE_SELL,
                                                     type = ORDER_TYPE_MARKET,
                                                     quantity = quantity)
-                            print(order)
                             positions[symbol] = False
-
-                            log.info(f'                                         market SELL order placed for {symbol} !!!')
+                            sell_price = np.round(float(order['fills'][0]['price']),5)
+                            eur_amount = np.round(float(order['cummulativeQuoteQty']),2)
+                            log.info(f'##################################################################### ')
+                            log.info(f'########################### SELL Executed! ########################## ')
+                            log.info(f'########################### Time: {now.strftime("%Y-%m-%d %H:%M:%S")} ############### ')
+                            log.info(f'###### Sell order placed for {symbol} at {sell_price} for {eur_amount} EUR ######## ')
+                            log.info(f'########################### SELL Executed! ########################## ')
+                            log.info(f'##################################################################### ')
                             break
                         except:
                             decimal_place -= 1
@@ -111,32 +135,70 @@ def start_trading_bot(client, trade_pairs, kline_size, window_short, window_long
 
                 else:
                     pass
-        end = time.time()
-        # sleep for exactly 15 minutes since start
-        time.sleep(60 * 15 - (end - start) - 1/24)
+        # start next iteration at exactly 50 second onto the minute
+        second = int(datetime.datetime.now().strftime("%S"))
+        if second >= 54:
+            time.sleep(54 + 60 - second)
+        else:
+            time.sleep(54 - second)
     
 
 if __name__ == "__main__":
     client = Client(config.api_key, config.secret_key)
     trade_pairs = ["BTCEUR", "ETHEUR", "DOGEEUR", "XRPEUR"]
-    kline_size = "15m"
+    kline_size = "1m"
 
     # windows dependant on symbol, results are base on backtesting
     # adjustments needed for different trade pairs and kline_sizes
-    windows_short = {"BTCEUR": 20, 
-                     "ETHEUR": 46, 
-                     "DOGEEUR": 50,
-                     "XRPEUR": 24
-                     }
-    windows_long = {"BTCEUR": 240, 
-                     "ETHEUR": 330, 
-                     "DOGEEUR": 100,
-                     "XRPEUR": 400
-                     }
+    windows_short = {"15m":
+                        {"BTCEUR": 20, 
+                         "ETHEUR": 46, 
+                         "DOGEEUR": 50,
+                         "ADAEUR": 128,
+                         "XRPEUR": 24
+                         },
+                    "5m":
+                        {"BTCEUR": 152, 
+                         "ETHEUR": 132, 
+                         "DOGEEUR": 136,
+                         "ADAEUR": 128,
+                         "XRPEUR": 164
+                         },
+                    "1m":
+                        {"BTCEUR": 750, 
+                         "ETHEUR": 640, 
+                         "DOGEEUR": 640,
+                         "ADAEUR": 640,
+                         "XRPEUR": 800
+                         }
+                    }
 
+    windows_long = {"15m":
+                        {"BTCEUR": 240, 
+                         "ETHEUR": 330, 
+                         "DOGEEUR": 100,
+                         "ADAEUR": 128,
+                         "XRPEUR": 400
+                         },
+                    "5m":
+                        {"BTCEUR": 203, 
+                         "ETHEUR": 195, 
+                         "DOGEEUR": 297,
+                         "ADAEUR": 172,
+                         "XRPEUR": 295
+                         },
+                    "1m":
+                        {"BTCEUR": 1000, 
+                         "ETHEUR": 1000, 
+                         "DOGEEUR": 1500,
+                         "ADAEUR": 900,
+                         "XRPEUR": 1500
+                         }
+                    }
     if not os.path.exists(data_folder):
         os.makedirs(data_folder)
 
-    start_trading_bot(client, trade_pairs, kline_size, windows_short, windows_long)
+
+    start_trading_bot(client, trade_pairs, kline_size, windows_short = windows_short[kline_size], windows_long = windows_long[kline_size])
 
 
