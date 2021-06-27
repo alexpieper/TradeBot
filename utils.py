@@ -105,7 +105,7 @@ def update_data(client, symbol, kline_size, save = False):
     temp_df = pd.DataFrame(data)
     data_df = data_df.append(temp_df)
     # truncate to save speed and storage:
-    data_df = data_df.iloc[-500:,:]
+    data_df = data_df.iloc[-2000:,:]
     if save: 
         data_df.to_csv(os.path.join(data_folder,filename))
     return data_df
@@ -198,4 +198,9 @@ def create_plot(data, pair, kline_size, short, long):
 
     fig.suptitle(pair, x=0.51, ha="right", fontsize=24)
     fig.tight_layout()
-    plt.savefig("backtest_evaluations/" + pair + "_" + str(kline_size) + "_" + str(short) + "_" + str(long) + ".jpeg")
+    plt.savefig(os.path.join("backtest_evaluations", kline_size, + pair + "_" + str(kline_size) + "_" + str(short) + "_" + str(long) + ".jpeg"))
+
+if __name__ == "__main__":
+    from binance.client import Client
+    client = Client(config.api_key, config.secret_key)
+    retrieve_data(client, "DOGEUSDT", "5m", save = True, start = "2021-01-01")
