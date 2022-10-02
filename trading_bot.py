@@ -91,12 +91,16 @@ def start_trading_bot(client, trade_pairs, kline_size, windows_short, windows_lo
                         order = client.create_order(symbol = symbol,
                                                     side = SIDE_BUY,
                                                     type = ORDER_TYPE_MARKET,
-                                                    quoteOrderQty = 300)
+                                                    quoteOrderQty = 250)
                     except:
-                        order = client.create_order(symbol = symbol,
-                                                    side = SIDE_BUY,
-                                                    type = ORDER_TYPE_MARKET,
-                                                    quoteOrderQty = client.get_asset_balance(asset="EUR")["free"])
+                        try:
+                            order = client.create_order(symbol = symbol,
+                                                        side = SIDE_BUY,
+                                                        type = ORDER_TYPE_MARKET,
+                                                        quoteOrderQty = client.get_asset_balance(asset="EUR")["free"])
+                        except:
+                            log.info(f'Tried to buy {symbol}, but the balance is too low, to no trade can be executed')
+                            continue
                     positions[symbol] = True
                     buy_price = np.round(float(order['fills'][0]['price']),5)
                     eur_amount = np.round(float(order['cummulativeQuoteQty']),2)
@@ -111,7 +115,14 @@ def start_trading_bot(client, trade_pairs, kline_size, windows_short, windows_lo
                 if positions[symbol]:
                     # Actual sell function, handle with care!
                     decimal_place = 15
-                    while decimal_place > -1:
+                    quantity = trunc(float(client.get_asset_balance(asset=symbol.split("EUR")[0])["free"]), decimal_place)     
+                    
+                    #  because of the different magnitudes of the currencies (i.e. Doge = 0.3 EUR, BTC = 30000 EUR)
+                    if symbol in ["ETHEUR", "BTCEUR"]:
+                        min_dec_place = 2
+                    else:
+                        min_dec_place = -1
+                    while decimal_place > min_dec_place:
                         try:
                             order = client.create_order(symbol = symbol,
                                                     side = SIDE_SELL,
